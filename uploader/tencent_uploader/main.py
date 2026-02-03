@@ -109,8 +109,9 @@ async def weixin_setup(account_file, handle=False):
 
 
 class TencentVideo(object):
-    def __init__(self, title, file_path, tags, publish_date: datetime, account_file, category=None, is_draft=False):
-        self.title = title  # 视频标题
+    def __init__(self, title, file_path, tags, publish_date: datetime, account_file, category=None, is_draft=False, short_title=None):
+        self.title = title  # 描述内容（显示在描述区）
+        self.short_title = short_title  # 短标题（6-16字，用于搜索/话题等）
         self.file_path = file_path
         self.tags = tags
         self.publish_date = publish_date
@@ -226,7 +227,11 @@ class TencentVideo(object):
             "xpath=following-sibling::div").locator(
             'span input[type="text"]')
         if await short_title_element.count():
-            short_title = format_str_for_short_title(self.title)
+            # 优先使用传入的 short_title，否则从 title 生成
+            if self.short_title:
+                short_title = format_str_for_short_title(self.short_title)
+            else:
+                short_title = format_str_for_short_title(self.title)
             await short_title_element.fill(short_title)
             tencent_logger.info(f"  [-] 短标题: {short_title} (长度: {len(short_title)})")
 
