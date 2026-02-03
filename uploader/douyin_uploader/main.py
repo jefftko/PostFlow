@@ -64,7 +64,7 @@ async def douyin_cookie_gen(account_file):
 
 
 class DouYinVideo(object):
-    def __init__(self, title, file_path, tags, publish_date: datetime, account_file, thumbnail_path=None, productLink='', productTitle=''):
+    def __init__(self, title, file_path, tags, publish_date: datetime, account_file, thumbnail_path=None, productLink='', productTitle='', description=''):
         self.title = title  # 视频标题
         self.file_path = file_path
         self.tags = tags
@@ -76,20 +76,52 @@ class DouYinVideo(object):
         self.thumbnail_path = thumbnail_path
         self.productLink = productLink
         self.productTitle = productTitle
+        self.description = description  # 视频描述
 
     async def set_schedule_time_douyin(self, page, publish_date):
-        # 选择包含特定文本内容的 label 元素
+        # 2026-02-03: 增强定时发布逻辑
+        douyin_logger.info(f'  [-] 正在设置定时发布: {publish_date}')
+        
+        # 选择"定时发布"单选按钮
         label_element = page.locator("[class^='radio']:has-text('定时发布')")
-        # 在选中的 label 元素下点击 checkbox
-        await label_element.click()
+        if await label_element.count():
+            await label_element.click()
+            douyin_logger.info(f'  [-] 已点击定时发布选项')
+        else:
+            douyin_logger.error(f'  [-] 未找到定时发布选项')
+            return
+        
         await asyncio.sleep(1)
         publish_date_hour = publish_date.strftime("%Y-%m-%d %H:%M")
 
-        await asyncio.sleep(1)
-        await page.locator('.semi-input[placeholder="日期和时间"]').click()
-        await page.keyboard.press("Control+KeyA")
-        await page.keyboard.type(str(publish_date_hour))
-        await page.keyboard.press("Enter")
+        # 尝试多种选择器定位时间输入框
+        time_input = None
+        selectors = [
+            '.semi-input[placeholder="日期和时间"]',
+            'input[placeholder="日期和时间"]',
+            '.semi-datepicker-input input',
+            'input.semi-input[type="text"]',
+        ]
+        
+        for selector in selectors:
+            if await page.locator(selector).count():
+                time_input = page.locator(selector).first
+                douyin_logger.info(f'  [-] 找到时间输入框: {selector}')
+                break
+        
+        if time_input:
+            await time_input.click()
+            await asyncio.sleep(0.5)
+            await page.keyboard.press("Control+KeyA")
+            await page.keyboard.type(str(publish_date_hour))
+            await page.keyboard.press("Enter")
+            douyin_logger.info(f'  [-] 已输入定时时间: {publish_date_hour}')
+        else:
+            douyin_logger.error(f'  [-] 未找到时间输入框，尝试点击日期区域')
+            # 备用：尝试点击包含时间的区域
+            await page.keyboard.press("Tab")
+            await page.keyboard.type(str(publish_date_hour))
+            await page.keyboard.press("Enter")
 
         await asyncio.sleep(1)
 
@@ -139,22 +171,33 @@ class DouYinVideo(object):
                     print("  [-] 超时未进入视频发布页面，重新尝试...")
                     await asyncio.sleep(0.5)  # 等待 0.5 秒后重新尝试
         # 填充标题和话题
-        # 检查是否存在包含输入框的元素
-        # 这里为了避免页面变化，故使用相对位置定位：作品标题父级右侧第一个元素的input子元素
+        # 2026-02-03 修复：用 placeholder 精确定位标题输入框
         await asyncio.sleep(1)
         douyin_logger.info(f'  [-] 正在填充标题和话题...')
-        title_container = page.get_by_text('作品标题').locator("..").locator("xpath=following-sibling::div[1]").locator("input")
+        # 优先用 placeholder 定位
+        title_container = page.locator('input[placeholder="填写作品标题，为作品获得更多流量"]')
         if await title_container.count():
             await title_container.fill(self.title[:30])
         else:
-            titlecontainer = page.locator(".notranslate")
-            await titlecontainer.click()
-            await page.keyboard.press("Backspace")
-            await page.keyboard.press("Control+KeyA")
-            await page.keyboard.press("Delete")
-            await page.keyboard.type(self.title)
-            await page.keyboard.press("Enter")
+            # 备用：原来的定位方式
+            title_container = page.get_by_text('作品标题').locator("..").locator("xpath=following-sibling::div[1]").locator("input")
+            if await title_container.count():
+                await title_container.fill(self.title[:30])
+            else:
+                titlecontainer = page.locator(".notranslate")
+                await titlecontainer.click()
+                await page.keyboard.press("Backspace")
+                await page.keyboard.press("Control+KeyA")
+                await page.keyboard.press("Delete")
+                await page.keyboard.type(self.title)
+                await page.keyboard.press("Enter")
         css_selector = ".zone-container"
+        # 2026-02-03: 先填写描述内容，再填标签
+        if self.description:
+            await page.click(css_selector)
+            await page.keyboard.type(self.description)
+            await page.keyboard.press("Enter")
+            douyin_logger.info(f'  [-] 已填写描述内容')
         for index, tag in enumerate(self.tags, start=1):
             await page.type(css_selector, "#" + tag)
             await page.press(css_selector, "Space")
