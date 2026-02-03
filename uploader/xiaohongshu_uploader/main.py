@@ -64,7 +64,7 @@ async def xiaohongshu_cookie_gen(account_file):
 
 
 class XiaoHongShuVideo(object):
-    def __init__(self, title, file_path, tags, publish_date: datetime, account_file, thumbnail_path=None):
+    def __init__(self, title, file_path, tags, publish_date: datetime, account_file, thumbnail_path=None, description=None):
         self.title = title  # 视频标题
         self.file_path = file_path
         self.tags = tags
@@ -74,32 +74,59 @@ class XiaoHongShuVideo(object):
         self.local_executable_path = LOCAL_CHROME_PATH
         self.headless = LOCAL_CHROME_HEADLESS
         self.thumbnail_path = thumbnail_path
+        self.description = description  # 视频描述/正文
 
     async def set_schedule_time_xiaohongshu(self, page, publish_date):
-        print("  [-] 正在设置定时发布时间...")
-        print(f"publish_date: {publish_date}")
-
-        # 使用文本内容定位元素
-        # element = await page.wait_for_selector(
-        #     'label:has-text("定时发布")',
-        #     timeout=5000  # 5秒超时时间
-        # )
-        # await element.click()
-
-        # # 选择包含特定文本内容的 label 元素
-        label_element = page.locator("label:has-text('定时发布')")
-        # # 在选中的 label 元素下点击 checkbox
-        await label_element.click()
-        await asyncio.sleep(1)
+        """设置定时发布时间 - 2026.02.03 重写"""
+        xiaohongshu_logger.info("  [-] 正在设置定时发布时间...")
+        xiaohongshu_logger.info(f"  [-] 目标时间: {publish_date}")
+        
+        # 1. 点击定时发布开关
+        try:
+            # 定位定时发布区域的开关
+            switch = page.locator('.post-time-wrapper .d-switch-simulator')
+            if await switch.count() > 0:
+                await switch.click(timeout=5000)
+                xiaohongshu_logger.info("  [+] 定时发布开关已点击")
+            else:
+                # 备用选择器
+                switch = page.locator('.post-time-wrapper').locator('.d-switch')
+                await switch.click(timeout=5000)
+                xiaohongshu_logger.info("  [+] 定时发布开关已点击 (备用)")
+        except Exception as e:
+            xiaohongshu_logger.warning(f"  [!] 点击定时发布开关失败: {e}")
+            return
+        
+        # 2. 等待时间选择器出现
+        await asyncio.sleep(2)
+        
+        # 3. 填写时间 - 只在 .post-time-wrapper 内查找输入框
         publish_date_hour = publish_date.strftime("%Y-%m-%d %H:%M")
-        print(f"publish_date_hour: {publish_date_hour}")
-
-        await asyncio.sleep(1)
-        await page.locator('.el-input__inner[placeholder="选择日期和时间"]').click()
-        await page.keyboard.press("Control+KeyA")
-        await page.keyboard.type(str(publish_date_hour))
-        await page.keyboard.press("Enter")
-
+        
+        try:
+            # 在定时发布区域内找时间输入框
+            time_wrapper = page.locator('.post-time-wrapper')
+            time_input = time_wrapper.locator('input[type="text"], input:not([type="checkbox"])')
+            
+            if await time_input.count() > 0:
+                # 用 fill 直接设置值
+                await time_input.first.click(timeout=3000)
+                await asyncio.sleep(0.5)
+                await time_input.first.fill(publish_date_hour)
+                await page.keyboard.press("Enter")
+                xiaohongshu_logger.info(f"  [+] 时间已设置: {publish_date_hour}")
+            else:
+                # 尝试点击区域后查找弹出的日期选择器
+                date_picker = page.locator('.d-date-picker input, .el-date-editor input')
+                if await date_picker.count() > 0:
+                    await date_picker.first.fill(publish_date_hour)
+                    await page.keyboard.press("Enter")
+                    xiaohongshu_logger.info(f"  [+] 时间已设置 (date-picker): {publish_date_hour}")
+                else:
+                    xiaohongshu_logger.warning("  [!] 未找到时间输入框")
+        except Exception as e:
+            xiaohongshu_logger.warning(f"  [!] 设置时间失败: {e}")
+        
         await asyncio.sleep(1)
 
     async def handle_upload_error(self, page):
@@ -130,56 +157,113 @@ class XiaoHongShuVideo(object):
         # 点击 "上传视频" 按钮
         await page.locator("div[class^='upload-content'] input[class='upload-input']").set_input_files(self.file_path)
 
-        # 等待页面跳转到指定的 URL 2025.01.08修改在原有基础上兼容两种页面
-        while True:
+        # 等待视频上传完成 - 2026.02.03 修复：必须等"重新上传"按钮出现
+        xiaohongshu_logger.info("  [-] 等待视频上传完成...")
+        max_wait = 180  # 最多等待180秒（3分钟）
+        for i in range(max_wait):
             try:
-                # 等待upload-input元素出现
-                upload_input = await page.wait_for_selector('input.upload-input', timeout=3000)
-                # 获取下一个兄弟元素
-                preview_new = await upload_input.query_selector(
-                    'xpath=following-sibling::div[contains(@class, "preview-new")]')
-                if preview_new:
-                    # 在preview-new元素中查找包含"上传成功"的stage元素
-                    stage_elements = await preview_new.query_selector_all('div.stage')
-                    upload_success = False
-                    for stage in stage_elements:
-                        text_content = await page.evaluate('(element) => element.textContent', stage)
-                        if '上传成功' in text_content:
-                            upload_success = True
-                            break
-                    if upload_success:
-                        xiaohongshu_logger.info("[+] 检测到上传成功标识!")
-                        break  # 成功检测到上传成功后跳出循环
-                    else:
-                        print("  [-] 未找到上传成功标识，继续等待...")
-                else:
-                    print("  [-] 未找到预览元素，继续等待...")
-                    await asyncio.sleep(1)
+                # 只用"重新上传"按钮作为成功标识（最可靠）
+                reupload_btn = page.locator('text="重新上传"')
+                if await reupload_btn.count() > 0:
+                    xiaohongshu_logger.info("[+] 检测到「重新上传」按钮，视频上传成功!")
+                    # 额外等待5秒让页面和预览完全加载
+                    xiaohongshu_logger.info("  [-] 等待页面稳定...")
+                    await asyncio.sleep(5)
+                    break
+                
+                # 兼容旧版 - 检测"上传成功"文字
+                success_text = page.locator('text="上传成功"')
+                if await success_text.count() > 0:
+                    xiaohongshu_logger.info("[+] 检测到「上传成功」标识!")
+                    await asyncio.sleep(2)
+                    break
+                
+                print(f"  [-] 上传中... ({i+1}s)")
+                await asyncio.sleep(1)
             except Exception as e:
-                print(f"  [-] 检测过程出错: {str(e)}，重新尝试...")
-                await asyncio.sleep(0.5)  # 等待0.5秒后重新尝试
+                print(f"  [-] 检测出错: {str(e)}")
+                await asyncio.sleep(1)
+        else:
+            xiaohongshu_logger.warning("  [!] 等待上传超时，尝试继续...")
 
-        # 填充标题和话题
-        # 检查是否存在包含输入框的元素
-        # 这里为了避免页面变化，故使用相对位置定位：作品标题父级右侧第一个元素的input子元素
+        # 填充标题和话题 - 2026.02.03 更新选择器兼容新版页面
         await asyncio.sleep(1)
         xiaohongshu_logger.info(f'  [-] 正在填充标题和话题...')
-        title_container = page.locator('div.plugin.title-container').locator('input.d-text')
-        if await title_container.count():
-            await title_container.fill(self.title[:30])
+        
+        # 尝试多种标题选择器
+        title_selectors = [
+            'div.plugin.title-container input.d-text',  # 旧版
+            'input[placeholder*="标题"]',               # placeholder 包含标题
+            'textarea[placeholder*="标题"]',            # textarea 版本
+            '.title-container input',                   # 通用
+            'input.title-input',                        # 可能的 class
+        ]
+        
+        title_filled = False
+        for selector in title_selectors:
+            try:
+                el = page.locator(selector)
+                if await el.count() > 0:
+                    await el.first.fill(self.title[:30])
+                    xiaohongshu_logger.info(f'  [+] 标题已填充 (selector: {selector})')
+                    title_filled = True
+                    break
+            except Exception as e:
+                continue
+        
+        if not title_filled:
+            # 尝试通过 placeholder 文本定位
+            try:
+                # 找"填写标题"相关的输入框
+                title_input = page.get_by_placeholder("填写标题", exact=False)
+                if await title_input.count() > 0:
+                    await title_input.first.fill(self.title[:30])
+                    xiaohongshu_logger.info('  [+] 标题已填充 (placeholder)')
+                    title_filled = True
+            except:
+                pass
+        
+        if not title_filled:
+            xiaohongshu_logger.warning('  [!] 未找到标题输入框，跳过标题填充')
+        
+        # 填充正文（描述 + 话题）- 2026.02.03 添加描述内容支持
+        await asyncio.sleep(0.5)
+        desc_selectors = [
+            '.ql-editor',                              # Quill 编辑器
+            'div[contenteditable="true"]',             # contenteditable
+            'textarea[placeholder*="正文"]',           # textarea
+            'textarea[placeholder*="描述"]',           # 描述
+        ]
+        
+        desc_filled = False
+        for selector in desc_selectors:
+            try:
+                el = page.locator(selector)
+                if await el.count() > 0:
+                    # 先清空再填充
+                    await el.first.click()
+                    
+                    # 1. 填充描述内容（如果有）
+                    if self.description:
+                        await el.first.type(self.description, delay=30)
+                        await el.first.type("\n\n", delay=30)  # 换行
+                        xiaohongshu_logger.info(f'  [+] 描述已填充')
+                    
+                    # 2. 填充话题标签
+                    for tag in self.tags:
+                        await el.first.type("#" + tag + " ", delay=50)
+                    
+                    xiaohongshu_logger.info(f'  [+] 正文和话题已填充 (selector: {selector})')
+                    desc_filled = True
+                    break
+            except Exception as e:
+                xiaohongshu_logger.info(f'  [-] 尝试 {selector} 失败: {e}')
+                continue
+        
+        if desc_filled:
+            xiaohongshu_logger.info(f'总共添加{len(self.tags)}个话题')
         else:
-            titlecontainer = page.locator(".notranslate")
-            await titlecontainer.click()
-            await page.keyboard.press("Backspace")
-            await page.keyboard.press("Control+KeyA")
-            await page.keyboard.press("Delete")
-            await page.keyboard.type(self.title)
-            await page.keyboard.press("Enter")
-        css_selector = ".ql-editor" # 不能加上 .ql-blank 属性，这样只能获取第一次非空状态
-        for index, tag in enumerate(self.tags, start=1):
-            await page.type(css_selector, "#" + tag)
-            await page.press(css_selector, "Space")
-        xiaohongshu_logger.info(f'总共添加{len(self.tags)}个话题')
+            xiaohongshu_logger.warning('  [!] 未找到正文输入框，跳过话题填充')
 
         # while True:
         #     # 判断重新上传按钮是否存在，如果不存在，代表视频正在上传，则等待
