@@ -12,23 +12,44 @@ from utils.log import tencent_logger
 
 
 def format_str_for_short_title(origin_title: str) -> str:
-    # 定义允许的特殊字符
-    allowed_special_chars = "《》“”:+?%°"
-
-    # 移除不允许的特殊字符
-    filtered_chars = [char if char.isalnum() or char in allowed_special_chars else ' ' if char == ',' else '' for
-                      char in origin_title]
-    formatted_string = ''.join(filtered_chars)
+    """
+    格式化短标题：6-16字符，只保留中文、字母、数字和少量允许的符号
+    """
+    import re
+    # 只保留中文、字母、数字、空格和少量符号
+    allowed_pattern = r'[\u4e00-\u9fa5a-zA-Z0-9《》""：:？?！!、，, ]'
+    filtered_chars = re.findall(allowed_pattern, origin_title)
+    formatted_string = ''.join(filtered_chars).strip()
+    
+    # 合并连续空格
+    formatted_string = re.sub(r'\s+', ' ', formatted_string)
 
     # 调整字符串长度
     if len(formatted_string) > 16:
-        # 截断字符串
-        formatted_string = formatted_string[:16]
+        formatted_string = formatted_string[:16].rstrip()
     elif len(formatted_string) < 6:
-        # 使用空格来填充字符串
         formatted_string += ' ' * (6 - len(formatted_string))
 
     return formatted_string
+
+
+def format_description(desc: str, max_length: int = 500) -> str:
+    """
+    格式化描述文本：过滤不支持的特殊字符，限制长度
+    """
+    import re
+    # 移除可能有问题的特殊字符（保留大部分中文标点和常用符号）
+    # 移除 emoji 和特殊 unicode 字符
+    cleaned = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9\s《》""''：:；;？?！!、，,。.…·\-—\(\)（）\[\]【】]', '', desc)
+    
+    # 合并连续空白
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    
+    # 限制长度
+    if len(cleaned) > max_length:
+        cleaned = cleaned[:max_length-3] + '...'
+    
+    return cleaned
 
 
 async def cookie_auth(account_file):
@@ -149,9 +170,15 @@ class TencentVideo(object):
         tencent_logger.info(f'[+]正在上传-------{self.title}.mp4')
         # 等待页面跳转到指定的 URL，没进入，则自动等待到超时
         await page.wait_for_url("https://channels.weixin.qq.com/platform/post/create")
-        # await page.wait_for_selector('input[type="file"]', timeout=10000)
+        # 等待页面加载完成（file input 是隐藏的，需要等待更长时间）
+        await asyncio.sleep(5)
+        # 直接定位隐藏的 file input 并设置文件
         file_input = page.locator('input[type="file"]')
-        await file_input.set_input_files(self.file_path)
+        if await file_input.count() > 0:
+            await file_input.set_input_files(self.file_path)
+            tencent_logger.info(f'  [-] 视频文件已选择')
+        else:
+            tencent_logger.error(f'  [-] 未找到文件上传元素')
         # 填充标题和话题
         await self.add_title_tags(page)
         # 添加商品
@@ -183,6 +210,7 @@ class TencentVideo(object):
         if await short_title_element.count():
             short_title = format_str_for_short_title(self.title)
             await short_title_element.fill(short_title)
+            tencent_logger.info(f"  [-] 短标题: {short_title} (长度: {len(short_title)})")
 
     async def click_publish(self, page):
         while True:
@@ -242,11 +270,14 @@ class TencentVideo(object):
 
     async def add_title_tags(self, page):
         await page.locator("div.input-editor").click()
-        await page.keyboard.type(self.title)
+        # 格式化描述，过滤特殊字符
+        formatted_title = format_description(self.title)
+        await page.keyboard.type(formatted_title)
         await page.keyboard.press("Enter")
         for index, tag in enumerate(self.tags, start=1):
             await page.keyboard.type("#" + tag)
             await page.keyboard.press("Space")
+        tencent_logger.info(f"成功添加描述: {formatted_title[:30]}...")
         tencent_logger.info(f"成功添加hashtag: {len(self.tags)}")
 
     async def add_collection(self, page):
