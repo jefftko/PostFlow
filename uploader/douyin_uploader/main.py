@@ -110,12 +110,33 @@ class DouYinVideo(object):
                 break
         
         if time_input:
-            await time_input.click()
+            # 读取当前值
+            old_value = await time_input.input_value()
+            douyin_logger.info(f'  [-] 当前定时值: {old_value}')
+            
+            # 方案：用 fill() 直接替换整个值
+            await time_input.fill(str(publish_date_hour))
             await asyncio.sleep(0.5)
-            await page.keyboard.press("Control+KeyA")
-            await page.keyboard.type(str(publish_date_hour))
+            
+            # 校验
+            actual_value = await time_input.input_value()
+            douyin_logger.info(f'  [-] fill后的值: {actual_value}')
+            
+            if publish_date_hour in actual_value:
+                douyin_logger.info(f'  [-] 定时时间: {publish_date_hour} ✓ 校验通过')
+            else:
+                douyin_logger.error(f'  [-] 定时时间校验失败！期望: {publish_date_hour}, 实际: {actual_value}')
+                # 备用方案：点击输入框，全选删除，重新输入
+                await time_input.click()
+                await page.keyboard.press("Control+KeyA")
+                await page.keyboard.press("Backspace")
+                await page.keyboard.type(str(publish_date_hour), delay=50)
+                await asyncio.sleep(0.3)
+                actual_value = await time_input.input_value()
+                douyin_logger.info(f'  [-] 重试后: {actual_value}')
+            
             await page.keyboard.press("Enter")
-            douyin_logger.info(f'  [-] 已输入定时时间: {publish_date_hour}')
+            await asyncio.sleep(0.5)
         else:
             douyin_logger.error(f'  [-] 未找到时间输入框，尝试点击日期区域')
             # 备用：尝试点击包含时间的区域
