@@ -117,8 +117,10 @@ class TencentVideo(object):
     async def set_schedule_time_tencent(self, page, publish_date):
         label_element = page.locator("label").filter(has_text="定时").nth(1)
         await label_element.click()
+        tencent_logger.info(f"  [-] 设置定时发布: {publish_date}")
 
         await page.click('input[placeholder="请选择发表时间"]')
+        await asyncio.sleep(0.5)
 
         str_month = str(publish_date.month) if publish_date.month > 9 else "0" + str(publish_date.month)
         current_month = str_month + "月"
@@ -128,6 +130,7 @@ class TencentVideo(object):
         # 检查当前月份是否与目标月份相同
         if page_month != current_month:
             await page.click('button.weui-desktop-btn__icon__right')
+            tencent_logger.info(f"  [-] 切换到下个月")
 
         # 获取页面元素
         elements = await page.query_selector_all('table.weui-desktop-picker__table a')
@@ -139,14 +142,23 @@ class TencentVideo(object):
             text = await element.inner_text()
             if text.strip() == str(publish_date.day):
                 await element.click()
+                tencent_logger.info(f"  [-] 选择日期: {publish_date.day}日")
                 break
 
-        # 输入小时部分（假设选择11小时）
-        await page.click('input[placeholder="请选择时间"]')
-        await page.keyboard.press("Control+KeyA")
-        await page.keyboard.type(str(publish_date.hour))
+        # 输入时间部分（小时:分钟）
+        time_input = page.locator('input[placeholder="请选择时间"]')
+        await time_input.click()
+        await asyncio.sleep(0.3)
+        
+        # 格式化时间 HH:MM
+        time_str = f"{publish_date.hour:02d}:{publish_date.minute:02d}"
+        
+        # 使用 fill 直接替换值（更可靠）
+        await time_input.fill(time_str)
+        tencent_logger.info(f"  [-] 设置时间: {time_str}")
 
         # 选择标题栏（令定时时间生效）
+        await asyncio.sleep(0.3)
         await page.locator("div.input-editor").click()
 
     async def handle_upload_error(self, page):
