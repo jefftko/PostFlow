@@ -13,12 +13,18 @@ from utils.log import tencent_logger
 
 def format_str_for_short_title(origin_title: str) -> str:
     """
-    格式化短标题：6-16字符，只保留中文、字母、数字和少量允许的符号
+    格式化短标题：6-16字符
+    视频号只支持：书名号《》、引号""、冒号：、加号+、问号？、百分号%、摄氏度°
+    逗号用空格代替
     """
     import re
-    # 只保留中文、字母、数字、空格和少量符号
-    allowed_pattern = r'[\u4e00-\u9fa5a-zA-Z0-9《》""：:？?！!、，, ]'
-    filtered_chars = re.findall(allowed_pattern, origin_title)
+    
+    # 先把逗号替换成空格
+    title = origin_title.replace('，', ' ').replace(',', ' ')
+    
+    # 只保留：中文、字母、数字、空格 + 允许的符号（《》""：+？%°）
+    allowed_pattern = r'[\u4e00-\u9fa5a-zA-Z0-9 《》""：\+？%°]'
+    filtered_chars = re.findall(allowed_pattern, title)
     formatted_string = ''.join(filtered_chars).strip()
     
     # 合并连续空格
