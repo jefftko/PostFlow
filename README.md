@@ -2,8 +2,6 @@
 
 **PostFlow** 是一个多平台内容自动发布工具，帮助内容创作者一键发布视频、文章到多个社交媒体平台。
 
-> 🔀 本项目 fork 自 [dreammis/social-auto-upload](https://github.com/dreammis/social-auto-upload)，感谢原作者的开源贡献！
-
 ## 📖 一文档读懂怎么用（强烈推荐先看）
 
 **[docs/PUBLISH_GUIDE.md](docs/PUBLISH_GUIDE.md)** —— 安装、登录、抖音/小红书上传、定时发布、**已知坑 + 实战解法**一文打包。任何 AI agent / 新人开发者，**先读这一篇**。
@@ -90,13 +88,16 @@ PostFlow/
 └── conf.py            # 配置文件
 ```
 
-## 🔧 本地改动
+## 🔧 已修复 / 增强
 
-相比原项目，本 fork 增加了：
-
-- **description 参数**：支持填写视频描述
+- **抖音**：JS click 绕过 canvas / 多 selector fallback / 本地 Chrome
+- **小红书**：★ Web Component 发布按钮 selector / 定时逻辑重写
+- **视频号**：`wait_for_selector` 替代固定 sleep / `.first` 防 strict mode
+- **视频 description 参数**：支持填写完整描述
 - **标题定位修复**：使用 placeholder 精确定位
 - **定时发布修复**：使用 `fill()` 替换整个值，确保日期时间正确
+
+详见 [`docs/PUBLISH_GUIDE.md`](docs/PUBLISH_GUIDE.md) 「已知坑 + 解法」一节。
 
 ## 🤝 贡献
 
