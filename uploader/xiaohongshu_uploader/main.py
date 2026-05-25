@@ -12,7 +12,7 @@ from utils.log import xiaohongshu_logger
 
 async def cookie_auth(account_file):
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=LOCAL_CHROME_HEADLESS)
+        browser = await playwright.chromium.launch(headless=LOCAL_CHROME_HEADLESS, executable_path=LOCAL_CHROME_PATH)
         context = await browser.new_context(storage_state=account_file)
         context = await set_init_script(context)
         # 创建一个新的页面
@@ -48,7 +48,8 @@ async def xiaohongshu_setup(account_file, handle=False):
 async def xiaohongshu_cookie_gen(account_file):
     async with async_playwright() as playwright:
         options = {
-            'headless': LOCAL_CHROME_HEADLESS
+            'headless': LOCAL_CHROME_HEADLESS,
+            'executable_path': LOCAL_CHROME_PATH,
         }
         # Make sure to run headed.
         browser = await playwright.chromium.launch(**options)
@@ -81,12 +82,22 @@ class XiaoHongShuVideo(object):
         xiaohongshu_logger.info("  [-] 正在设置定时发布时间...")
         xiaohongshu_logger.info(f"  [-] 目标时间: {publish_date}")
         
+        # 0. 先关闭可能存在的弹窗（点击页面空白处）
+        try:
+            await page.keyboard.press("Escape")
+            await asyncio.sleep(0.3)
+            # 点击页面左上角空白处
+            await page.mouse.click(100, 100)
+            await asyncio.sleep(0.5)
+        except:
+            pass
+        
         # 1. 点击定时发布开关
         try:
             # 定位定时发布区域的开关
             switch = page.locator('.post-time-wrapper .d-switch-simulator')
             if await switch.count() > 0:
-                await switch.click(timeout=5000)
+                await switch.click(timeout=5000, force=True)
                 xiaohongshu_logger.info("  [+] 定时发布开关已点击")
             else:
                 # 备用选择器
@@ -301,24 +312,84 @@ class XiaoHongShuVideo(object):
         if self.publish_date != 0:
             await self.set_schedule_time_xiaohongshu(page, self.publish_date)
 
-        # 判断视频是否发布成功
-        while True:
+        # 判断视频是否发布成功（patch 2026-05-16 v3：多 selector fallback 链）
+        # 小红书新版红按钮可能是 <div role="button"> 或 Semi Design 的 .semi-button-primary，不是原生 <button>
+        max_retries = 40
+        retry_count = 0
+        publish_clicked = False
+        publish_success = False
+        btn_text = "定时发布" if self.publish_date != 0 else "发布"
+        # patch 2026-05-16 v4：关键发现 — 小红书发布按钮是 Web Component <xhs-publish-btn>
+        # 实测 outerHTML: <xhs-publish-btn submit-text="定时发布" submit-disabled="false">
+        # 不是 <button>，所有 has-text("定时发布") 类 selector 永不匹配
+        selector_candidates = [
+            f'xhs-publish-btn[submit-text="{btn_text}"][submit-disabled="false"]',  # 精准 + 可点击
+            f'xhs-publish-btn[submit-text="{btn_text}"]',  # 自定义元素 attribute 匹配
+            'xhs-publish-btn',  # 自定义元素兜底（页面唯一）
+            f'button.semi-button-primary:has-text("{btn_text}")',  # 旧版 Semi Design 兜底
+            f'[role="button"]:has-text("{btn_text}")',  # ARIA role 兜底
+            f'button:has-text("{btn_text}")',  # 原生 button 兜底
+        ]
+
+        async def try_click_publish():
+            """挨个尝试 selector，找到能点的就点"""
+            for sel in selector_candidates:
+                try:
+                    locator = page.locator(sel)
+                    cnt = await locator.count()
+                    if cnt > 0:
+                        # 取最后一个（页面里"定时发布"出现多次时右下角红按钮通常是最后一个）
+                        target = locator.last
+                        if await target.is_visible():
+                            await target.click(timeout=3000)
+                            return sel
+                except Exception:
+                    continue
+            return None
+
+        while retry_count < max_retries:
+            retry_count += 1
             try:
-                # 等待包含"定时发布"文本的button元素出现并点击
-                if self.publish_date != 0:
-                    await page.locator('button:has-text("定时发布")').click()
+                # 检测当前 URL 是否已跳转到 success 页面
+                current_url = page.url
+                if "/publish/success" in current_url or "/new/home" in current_url:
+                    xiaohongshu_logger.success(f"  [-]视频发布成功（URL 已跳转: {current_url}）")
+                    publish_success = True
+                    break
+
+                if not publish_clicked:
+                    clicked_sel = await try_click_publish()
+                    if clicked_sel:
+                        publish_clicked = True
+                        xiaohongshu_logger.info(f"  [+] 已点击发布按钮（selector: {clicked_sel}），等待跳转...")
                 else:
-                    await page.locator('button:has-text("发布")').click()
+                    # 已点过，检查 URL 或按钮是否消失
+                    still_exists = False
+                    for sel in selector_candidates:
+                        try:
+                            if await page.locator(sel).count() > 0:
+                                still_exists = True
+                                break
+                        except Exception:
+                            pass
+                    if not still_exists:
+                        xiaohongshu_logger.success("  [-]视频发布成功（按钮已消失）")
+                        publish_success = True
+                        break
+
+                # 等 URL 变化（兜底）
                 await page.wait_for_url(
                     "https://creator.xiaohongshu.com/publish/success?**",
                     timeout=3000
-                )  # 如果自动跳转到作品页面，则代表发布成功
-                xiaohongshu_logger.success("  [-]视频发布成功")
+                )
+                xiaohongshu_logger.success("  [-]视频发布成功（wait_for_url）")
+                publish_success = True
                 break
-            except:
-                xiaohongshu_logger.info("  [-] 视频正在发布中...")
-                await page.screenshot(full_page=True)
+            except Exception:
+                xiaohongshu_logger.info(f"  [-] 视频正在发布中... ({retry_count}/{max_retries})")
                 await asyncio.sleep(0.5)
+        if not publish_success:
+            xiaohongshu_logger.warning("  [!] 等待发布确认超时，视频可能已排定时（去小红书工作台手动确认）")
 
         await context.storage_state(path=self.account_file)  # 保存cookie
         xiaohongshu_logger.success('  [-]cookie更新完毕！')

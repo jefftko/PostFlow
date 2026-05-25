@@ -60,7 +60,7 @@ def format_description(desc: str, max_length: int = 500) -> str:
 
 async def cookie_auth(account_file):
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=LOCAL_CHROME_HEADLESS)
+        browser = await playwright.chromium.launch(headless=LOCAL_CHROME_HEADLESS, executable_path=LOCAL_CHROME_PATH)
         context = await browser.new_context(storage_state=account_file)
         context = await set_init_script(context)
         # 创建一个新的页面
@@ -83,6 +83,7 @@ async def get_tencent_cookie(account_file):
                 '--lang en-GB'
             ],
             'headless': LOCAL_CHROME_HEADLESS,  # Set headless option here
+            'executable_path': LOCAL_CHROME_PATH,
         }
         # Make sure to run headed.
         browser = await playwright.chromium.launch(**options)
@@ -122,8 +123,22 @@ class TencentVideo(object):
         self.local_executable_path = LOCAL_CHROME_PATH or None
 
     async def set_schedule_time_tencent(self, page, publish_date):
-        label_element = page.locator("label").filter(has_text="定时").nth(1)
-        await label_element.click()
+        # 先尝试 nth(1)，失败则用 JS click 兜底
+        try:
+            label_element = page.locator("label").filter(has_text="定时").nth(1)
+            await label_element.click(timeout=8000)
+        except Exception:
+            try:
+                label_element = page.locator("label").filter(has_text="定时").first
+                await label_element.click(timeout=8000)
+            except Exception:
+                await page.evaluate("""
+                    () => {
+                        const labels = [...document.querySelectorAll('label')];
+                        const t = labels.find(l => l.textContent.includes('定时'));
+                        if (t) t.click();
+                    }
+                """)
         tencent_logger.info(f"  [-] 设置定时发布: {publish_date}")
 
         await page.click('input[placeholder="请选择发表时间"]')
@@ -189,15 +204,61 @@ class TencentVideo(object):
         tencent_logger.info(f'[+]正在上传-------{self.title}.mp4')
         # 等待页面跳转到指定的 URL，没进入，则自动等待到超时
         await page.wait_for_url("https://channels.weixin.qq.com/platform/post/create")
-        # 等待页面加载完成（file input 是隐藏的，需要等待更长时间）
-        await asyncio.sleep(5)
-        # 直接定位隐藏的 file input 并设置文件
-        file_input = page.locator('input[type="file"]')
-        if await file_input.count() > 0:
+        # 等待页面 JS 初始化完成（"页面初始化中" 提示消失）+ file input 出现
+        # 之前固定 sleep 3s 不够，会卡在"未找到文件上传元素"
+        try:
+            await page.wait_for_selector('input[type="file"]', state='attached', timeout=30000)
+            tencent_logger.info('  [-] 页面初始化完成，input[type=file] 已出现')
+        except Exception as e:
+            tencent_logger.error(f'  [-] 等待 file input 超时 30s：{e}')
+        await asyncio.sleep(2)  # 多给点缓冲
+
+        # 新修复：先找上传区域并点击，再找 file input
+        # 尝试多种选择器定位上传区域
+        upload_selectors = [
+            'input[type="file"]',  # 直接找 file input
+            'div.upload-area',  # 上传区域
+            'div[class*="upload"]',  # 上传类名
+            'button:has-text("上传视频")',  # 上传按钮
+            'div:has-text("上传视频")',  # 上传文字区域
+            'div.post-create-upload',  # 发布页上传区
+        ]
+        
+        file_input = None
+        for selector in upload_selectors:
+            try:
+                # 用 .first 规避 Playwright strict mode（视频号 div[class*="upload"] 匹配 7 个元素）
+                locator = page.locator(selector)
+                count = await locator.count()
+                if count > 0:
+                    tencent_logger.info(f'  [-] 找到上传元素：{selector} (count={count})')
+                    if selector == 'input[type="file"]':
+                        file_input = locator.first
+                        break
+                    else:
+                        # 多元素时取第一个可见的，避免 strict mode violation
+                        await locator.first.click()
+                        await asyncio.sleep(2)
+                        fi = page.locator('input[type="file"]')
+                        if await fi.count() > 0:
+                            file_input = fi.first
+                            break
+            except Exception as e:
+                tencent_logger.debug(f'  [-] 选择器 {selector} 失败：{e}')
+                continue
+        
+        # 如果还是找不到，尝试截图调试
+        if not file_input or await file_input.count() == 0:
+            tencent_logger.error(f'  [-] 未找到文件上传元素')
+            # 截图调试
+            await page.screenshot(path='/tmp/weixin_upload_debug.png')
+            tencent_logger.info(f'  [-] 调试截图已保存：/tmp/weixin_upload_debug.png')
+            # 打印页面 HTML 片段
+            html = await page.content()
+            tencent_logger.debug(f'页面 HTML 长度：{len(html)}')
+        else:
             await file_input.set_input_files(self.file_path)
             tencent_logger.info(f'  [-] 视频文件已选择')
-        else:
-            tencent_logger.error(f'  [-] 未找到文件上传元素')
         # 填充标题和话题
         await self.add_title_tags(page)
         # 添加商品
@@ -271,6 +332,11 @@ class TencentVideo(object):
                 await asyncio.sleep(0.5)
 
     async def detect_upload_status(self, page):
+        # 重试上限补丁（2026-05-13）：防止 detect/handle_upload_error 无限循环
+        # 之前 EP100 卡 460+ 次重试，每次 handle_upload_error 重新 set_input_files
+        # 导致视频号工作台积累大量失败草稿；超过 max_error_retry 抛异常让上层 chain 跳过
+        max_error_retry = 5
+        error_retry_count = 0
         while True:
             # 匹配删除按钮，代表视频上传完毕，如果不存在，代表视频正在上传，则等待
             try:
@@ -285,8 +351,17 @@ class TencentVideo(object):
                     # 出错了视频出错
                     if await page.locator('div.status-msg.error').count() and await page.locator(
                             'div.media-status-content div.tag-inner:has-text("删除")').count():
-                        tencent_logger.error("  [-] 发现上传出错了...准备重试")
+                        error_retry_count += 1
+                        if error_retry_count > max_error_retry:
+                            tencent_logger.error(
+                                f"  [-] 上传重试 {max_error_retry} 次仍失败 — 放弃本集，抛异常让 chain 跳过下一集")
+                            raise RuntimeError(
+                                f"视频号上传失败超过 {max_error_retry} 次重试上限（可能是风控/UI改版/网络）")
+                        tencent_logger.error(
+                            f"  [-] 发现上传出错了...准备第 {error_retry_count}/{max_error_retry} 次重试")
                         await self.handle_upload_error(page)
+            except RuntimeError:
+                raise  # 让重试上限异常上抛
             except:
                 tencent_logger.info("  [-] 正在上传视频中...")
                 await asyncio.sleep(2)

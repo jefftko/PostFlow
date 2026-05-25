@@ -188,3 +188,55 @@ cookiesFile
 uploadFile
 videoFile
 
+# ============================================================
+# 用户私有数据（不入仓 · 防止泄露 brand / cookie / state）
+# ============================================================
+
+# Cookie / 账号文件（任何目录的 cookie 类）
+cookie/
+cookies_*/
+account/
+account.json
+*.cookie
+**/cookies/**/*.json
+!cookies/.gitkeep
+
+# 各平台扫码登录产物 / token
+token.pickle
+token.pickle.bak*
+*.token
+
+# 私有调用脚本（用户的 EP / 品牌特定上传脚本不入仓）
+# 仓库通用示例在 examples/，请勿在仓库根目录提交私有 upload 脚本
+upload_*.py
+relogin_*.py
+login_*.py
+refresh_*_cookie_*.sh
+*_upload.py
+*_upload_state.json
+
+# 单独保护：根目录 account 文件 / 任何 accounts.ini 含真实 cookie
+/account
+/account.json
+**/accounts.ini.local
+# accounts.ini 主仓里只能放 'changeme' 占位，绝不能含真实 cookie
+
+# 但保留 examples/ 下的官方通用示例
+!examples/upload_video_to_*.py
+
+# Redis dump / 本地 state
+dump.rdb
+*.rdb
+nanhara_*
+buguashuo_*
+
+# 私有 accounts 备份（防止暴露多账号矩阵）
+**/accounts_*_backup.ini
+**/accounts.local.ini
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+

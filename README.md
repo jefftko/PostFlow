@@ -4,6 +4,10 @@
 
 > 🔀 本项目 fork 自 [dreammis/social-auto-upload](https://github.com/dreammis/social-auto-upload)，感谢原作者的开源贡献！
 
+## 📖 一文档读懂怎么用（强烈推荐先看）
+
+**[docs/PUBLISH_GUIDE.md](docs/PUBLISH_GUIDE.md)** —— 安装、登录、抖音/小红书上传、定时发布、**已知坑 + 实战解法**一文打包。任何 AI agent / 新人开发者，**先读这一篇**。
+
 ## ✨ 功能特性
 
 ### 已支持平台

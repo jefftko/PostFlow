@@ -12,13 +12,13 @@ from utils.log import douyin_logger
 
 async def cookie_auth(account_file):
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=LOCAL_CHROME_HEADLESS)
+        browser = await playwright.chromium.launch(headless=LOCAL_CHROME_HEADLESS, executable_path=LOCAL_CHROME_PATH)
         context = await browser.new_context(storage_state=account_file)
         context = await set_init_script(context)
         # 创建一个新的页面
         page = await context.new_page()
         # 访问指定的 URL
-        await page.goto("https://creator.douyin.com/creator-micro/content/upload")
+        await page.goto("https://creator.douyin.com/creator-micro/content/upload", timeout=60000, wait_until="domcontentloaded")
         try:
             await page.wait_for_url("https://creator.douyin.com/creator-micro/content/upload", timeout=5000)
         except:
@@ -48,7 +48,8 @@ async def douyin_setup(account_file, handle=False):
 async def douyin_cookie_gen(account_file):
     async with async_playwright() as playwright:
         options = {
-            'headless': LOCAL_CHROME_HEADLESS
+            'headless': LOCAL_CHROME_HEADLESS,
+            'executable_path': LOCAL_CHROME_PATH,
         }
         # Make sure to run headed.
         browser = await playwright.chromium.launch(**options)
@@ -85,8 +86,15 @@ class DouYinVideo(object):
         # 选择"定时发布"单选按钮
         label_element = page.locator("[class^='radio']:has-text('定时发布')")
         if await label_element.count():
-            await label_element.click()
-            douyin_logger.info(f'  [-] 已点击定时发布选项')
+            # 先尝试滚动到元素并用 JS 点击（绕过 canvas 覆盖层）
+            await label_element.first.scroll_into_view_if_needed()
+            await asyncio.sleep(0.5)
+            try:
+                await label_element.first.evaluate("el => el.click()")
+                douyin_logger.info(f'  [-] 已通过JS点击定时发布选项')
+            except Exception:
+                await label_element.click()
+                douyin_logger.info(f'  [-] 已点击定时发布选项')
         else:
             douyin_logger.error(f'  [-] 未找到定时发布选项')
             return
@@ -163,13 +171,53 @@ class DouYinVideo(object):
         # 创建一个新的页面
         page = await context.new_page()
         # 访问指定的 URL
-        await page.goto("https://creator.douyin.com/creator-micro/content/upload")
+        await page.goto("https://creator.douyin.com/creator-micro/content/upload", timeout=60000, wait_until="domcontentloaded")
         douyin_logger.info(f'[+]正在上传-------{self.title}.mp4')
         # 等待页面跳转到指定的 URL，没进入，则自动等待到超时
         douyin_logger.info(f'[-] 正在打开主页...')
         await page.wait_for_url("https://creator.douyin.com/creator-micro/content/upload")
-        # 点击 "上传视频" 按钮
-        await page.locator("div[class^='container'] input").set_input_files(self.file_path)
+        
+        # 2026-02-10 修复：检查是否有登录弹窗，如果有则关闭或等待
+        await asyncio.sleep(2)  # 等待页面完全加载
+        
+        # 检查是否出现登录弹窗
+        login_modal = page.locator('div[class*="login"]').first
+        if await login_modal.count() > 0:
+            douyin_logger.warning("[-] 检测到登录弹窗，cookie可能已失效，请重新登录")
+            # 尝试关闭弹窗
+            close_btn = page.locator('div[class*="close"], button[class*="close"]').first
+            if await close_btn.count() > 0:
+                await close_btn.click()
+                await asyncio.sleep(1)
+        
+        # 点击 "上传视频" 按钮 - 多种定位器兜底
+        await asyncio.sleep(3)  # 额外等待页面JS加载
+        file_input = None
+        selectors = [
+            'input[type="file"]',
+            'input[accept*="video"]',
+            "div[class^='container'] input[accept]",
+            "div[class^='semi-upload'] input",
+            "div[class*='upload'] input[type='file']",
+            "input[accept]",
+        ]
+        for sel in selectors:
+            loc = page.locator(sel).first
+            try:
+                if await loc.count() > 0:
+                    file_input = loc
+                    douyin_logger.info(f'[+] 找到上传元素: {sel}')
+                    break
+            except Exception:
+                continue
+        
+        if file_input is None:
+            # 最后手段：等待任何 input[type=file] 出现
+            douyin_logger.info('[-] 等待上传元素出现...')
+            file_input = page.locator('input[type="file"]').first
+            await file_input.wait_for(state='attached', timeout=15000)
+        
+        await file_input.set_input_files(self.file_path)
 
         # 等待页面跳转到指定的 URL 2025.01.08修改在原有基础上兼容两种页面
         while True:
@@ -193,10 +241,17 @@ class DouYinVideo(object):
                     await asyncio.sleep(0.5)  # 等待 0.5 秒后重新尝试
         # 填充标题和话题
         # 2026-02-03 修复：用 placeholder 精确定位标题输入框
+        # 2026-03-20 修复：等待标题输入框出现（页面需要10+秒加载）
+        douyin_logger.info(f'  [-] 等待标题输入框加载...')
+        title_container = page.locator('input[placeholder="填写作品标题，为作品获得更多流量"]')
+        try:
+            await title_container.wait_for(state='visible', timeout=30000)
+            douyin_logger.info(f'  [-] 标题输入框已出现')
+        except:
+            douyin_logger.warning(f'  [-] 等待标题输入框超时，继续尝试')
         await asyncio.sleep(1)
         douyin_logger.info(f'  [-] 正在填充标题和话题...')
         # 优先用 placeholder 定位
-        title_container = page.locator('input[placeholder="填写作品标题，为作品获得更多流量"]')
         if await title_container.count():
             await title_container.fill(self.title[:30])
         else:
@@ -263,25 +318,75 @@ class DouYinVideo(object):
                 await page.locator(third_part_element).locator('input.semi-switch-native-control').click()
 
         if self.publish_date != 0:
+            # 2026-02-10/2026-02-18: 关闭可能存在的弹窗（如双封面/竖封面弹窗）
+            try:
+                modal = page.locator("div[role='dialog'][aria-modal='true']")
+                if await modal.count():
+                    douyin_logger.info('  [-] 检测到弹窗，尝试关闭...')
+                    # 方案1: 按 Escape
+                    await page.keyboard.press('Escape')
+                    await page.wait_for_timeout(600)
+                    # 方案2: 还有弹窗则找关闭按钮
+                    if await modal.count():
+                        modal_close = modal.locator("button:has-text('跳过'), button:has-text('关闭'), button:has-text('取消'), button:has-text('确定'), [aria-label='关闭'], svg[aria-label='关闭']")
+                        if await modal_close.count():
+                            await modal_close.first.click()
+                            await page.wait_for_timeout(500)
+                            douyin_logger.info('  [-] 已点击弹窗按钮关闭')
+                        else:
+                            # 方案3: 点击弹窗外（遮罩层）
+                            await page.mouse.click(10, 10)
+                            await page.wait_for_timeout(500)
+                            douyin_logger.info('  [-] 已点击遮罩层关闭弹窗')
+                    else:
+                        douyin_logger.info('  [-] Escape已关闭弹窗')
+            except:
+                pass
+            # 额外等待确保弹窗消失
+            await page.wait_for_timeout(500)
             await self.set_schedule_time_douyin(page, self.publish_date)
 
-        # 判断视频是否发布成功
-        while True:
-            # 判断视频是否发布成功
+        # 判断视频是否发布成功（最多等待120秒，避免无限循环）
+        max_retries = 40  # 40次 × ~3s = 约120秒
+        retry_count = 0
+        publish_success = False
+        publish_clicked = False
+        while retry_count < max_retries:
+            retry_count += 1
             try:
+                # 检查是否已经跳转到成功页面（多种URL模式）
+                current_url = page.url
+                if "manage" in current_url or "content/post" not in current_url.split("?")[0].split("creator-micro/")[-1]:
+                    # URL 已经不是发布页面，认为成功
+                    if publish_clicked:
+                        douyin_logger.success("  [-]视频发布成功（URL已跳转）")
+                        publish_success = True
+                        break
+
                 publish_button = page.get_by_role('button', name="发布", exact=True)
-                if await publish_button.count():
+                btn_count = await publish_button.count()
+                if btn_count and not publish_clicked:
+                    # 只点击一次发布按钮
                     await publish_button.click()
+                    publish_clicked = True
+                    douyin_logger.info("  [-] 已点击发布按钮，等待跳转...")
+                elif not btn_count and publish_clicked:
+                    # 按钮消失了，说明发布成功
+                    douyin_logger.success("  [-]视频发布成功（按钮已消失）")
+                    publish_success = True
+                    break
+
                 await page.wait_for_url("https://creator.douyin.com/creator-micro/content/manage**",
-                                        timeout=3000)  # 如果自动跳转到作品页面，则代表发布成功
+                                        timeout=3000)
                 douyin_logger.success("  [-]视频发布成功")
+                publish_success = True
                 break
             except:
-                # 尝试处理封面问题
                 await self.handle_auto_video_cover(page)
-                douyin_logger.info("  [-] 视频正在发布中...")
-                await page.screenshot(full_page=True)
+                douyin_logger.info(f"  [-] 视频正在发布中... ({retry_count}/{max_retries})")
                 await asyncio.sleep(0.5)
+        if not publish_success:
+            douyin_logger.warning("  [!] 等待发布确认超时，视频可能已发布，请手动确认")
 
         await context.storage_state(path=self.account_file)  # 保存cookie
         douyin_logger.success('  [-]cookie更新完毕！')
@@ -329,7 +434,33 @@ class DouYinVideo(object):
     async def set_thumbnail(self, page: Page, thumbnail_path: str):
         if thumbnail_path:
             douyin_logger.info('  [-] 正在设置视频封面...')
-            await page.click('text="选择封面"')
+            # 关闭可能存在的新手引导弹窗
+            try:
+                guide_btn = page.locator('button.shepherd-button:has-text("我知道了")')
+                if await guide_btn.count() > 0:
+                    await guide_btn.click()
+                    await page.wait_for_timeout(500)
+            except Exception:
+                pass
+            # 点击页面空白处关闭 tag 下拉
+            try:
+                await page.keyboard.press('Escape')
+                await page.wait_for_timeout(300)
+            except Exception:
+                pass
+            # 先按 Escape + 点空白区域确保 hashtag 浮层关闭
+            await page.keyboard.press('Escape')
+            await page.wait_for_timeout(800)
+            await page.mouse.click(400, 200)
+            await page.wait_for_timeout(800)
+            # 用 JS 点击"选择封面"，绕过任何浮层拦截
+            await page.evaluate("""
+                () => {
+                    const els = [...document.querySelectorAll('div')].filter(el => el.textContent.trim() === '选择封面');
+                    if (els.length > 0) { els[0].click(); return true; }
+                    return false;
+                }
+            """)
             await page.wait_for_selector("div.dy-creator-content-modal")
             await page.click('text="设置竖封面"')
             await page.wait_for_timeout(2000)  # 等待2秒
