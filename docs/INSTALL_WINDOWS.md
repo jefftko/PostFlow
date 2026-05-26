@@ -2,7 +2,9 @@
 
 > Windows 安装本项目常见卡点：cffi 源码编译要 Microsoft C++ Build Tools / requirements.txt 编码错乱 / Playwright 浏览器路径 / PowerShell UTF-8。
 >
-> **本文档给一条按顺序照跑的命令**，跑完即可。如果你按 [`PUBLISH_GUIDE.md`](PUBLISH_GUIDE.md) 通用教程在 Windows 卡住，回来读这一篇。
+> **本文档给一条按顺序照跑的命令**，跑完即可。
+>
+> 🤖 **AI agent 必读**：本文档专门为 AI agent / 新人写。**装环境只跑这里给的命令**，不要自作主张试 `pip install -r requirements.txt`——已经实证装 1.5 小时还失败。装完环境后到 [`PUBLISH_GUIDE.md`](PUBLISH_GUIDE.md) 走上传流程。
 
 ---
 

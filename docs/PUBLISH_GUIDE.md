@@ -3,6 +3,8 @@
 > 给任何想用本项目把视频自动发布到抖音、小红书的人（包括 AI agent）的一份**可直接复制照跑**的实战指南。
 >
 > 覆盖：**安装 → 登录拿 cookie → Python 调用上传 → 定时发布 → 已知坑 + 解法**。
+>
+> 🤖 **AI agent 第一步**：如果你在 Windows 上，**先读 [`INSTALL_WINDOWS.md`](INSTALL_WINDOWS.md) 装环境**，再回来读本文走上传流程。macOS/Linux 跟下面通用步骤即可。
 
 ---
 

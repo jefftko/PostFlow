@@ -2,9 +2,27 @@
 
 **PostFlow** 是一个多平台内容自动发布工具，帮助内容创作者一键发布视频、文章到多个社交媒体平台。
 
-## 📖 一文档读懂怎么用（强烈推荐先看）
+---
 
-**[docs/PUBLISH_GUIDE.md](docs/PUBLISH_GUIDE.md)** —— 安装、登录、抖音/小红书上传、定时发布、**已知坑 + 实战解法**一文打包。任何 AI agent / 新人开发者，**先读这一篇**。
+## 🤖 AI agent / 新人 — 第一步读这里（按顺序）
+
+如果你是被指派来配置或使用这个项目的 **AI agent**（Claude / GPT / Cursor / Cline 等），**不要直接跑 `pip install -r requirements.txt`**——按下面顺序读 + 跑，能避免装 1 小时还失败：
+
+| 操作系统 | 第一步读 | 第二步读 |
+|---|---|---|
+| **Windows** | 📘 [`docs/INSTALL_WINDOWS.md`](docs/INSTALL_WINDOWS.md) | 📕 [`docs/PUBLISH_GUIDE.md`](docs/PUBLISH_GUIDE.md) |
+| **macOS / Linux** | 📕 [`docs/PUBLISH_GUIDE.md`](docs/PUBLISH_GUIDE.md) §1 安装 | 📕 同一篇 §3-5 抖音/小红书上传 |
+
+**关键约束**（避免常见错误）：
+1. ✅ 用 **Python 3.11**（不要用 3.13，cp313 wheel 不全）
+2. ✅ 装依赖用 **`requirements-minimal.txt`**（`requirements.txt` 把 cffi 等 pin 死了，Windows 会撞 MSVC Build Tools 墙）
+3. ✅ 先 `pip install --upgrade pip setuptools wheel` 再装依赖
+4. ✅ `conf.py` 里 `LOCAL_CHROME_PATH` 指本机已装 Chrome（不要用 Playwright bundled chromium，会被风控）
+5. ❌ 不要把 `cookies/` / `account.json` / `token.pickle` 提交到任何仓库
+
+如果你跑了 1 小时还没装上 —— **大概率漏了第 1 或第 2 条**，回去重读 INSTALL 文档。
+
+---
 
 ## ✨ 功能特性
 
