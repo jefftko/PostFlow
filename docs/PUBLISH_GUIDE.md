@@ -21,26 +21,37 @@
 
 ## 1. 安装
 
+> ⚠️ **Windows 用户请先看 [`docs/INSTALL_WINDOWS.md`](INSTALL_WINDOWS.md)** —— Windows 有特定坑（cffi 源码编译 / 编码 / PowerShell），按那篇照跑能避免装 1 小时还失败。
+>
+> macOS / Linux 跟下面通用步骤即可。
+
 ```bash
 # 1. clone
 git clone https://github.com/jefftko/PostFlow.git
 cd PostFlow
 
-# 2. Python 3.10+ + 依赖
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+# 2. Python 3.10/3.11/3.12（推荐 3.11），创建虚拟环境
+python3.11 -m venv venv
+source venv/bin/activate              # macOS/Linux
+# .\venv\Scripts\Activate.ps1         # Windows PowerShell
 
-# 3. Playwright 浏览器（chromium 即可）
+# 3. ★ 升级 pip 再装依赖（否则旧 pip 找 wheel 能力差，可能强制源码编译）
+python -m pip install --upgrade pip setuptools wheel
+
+# 4. 装依赖（首选 minimal 版本约束宽松，跨平台更稳）
+pip install -r requirements-minimal.txt
+# 完整版（含 Flask web 后端）：pip install -r requirements.txt
+
+# 5. Playwright 浏览器（chromium 即可）
 playwright install chromium
 
-# 4. 拷贝配置
+# 6. 拷贝配置
 cp conf.example.py conf.py
 # 编辑 conf.py 改两行：
 #   BASE_DIR        = "/your/abs/path/to/PostFlow"
 #   LOCAL_CHROME_PATH = "/Applications/Google Chrome.app/.../Google Chrome"  # 留空跑 playwright bundled chromium
 
-# 5. （可选）初始化数据库
+# 7. （可选）初始化数据库
 python db/createTable.py
 ```
 

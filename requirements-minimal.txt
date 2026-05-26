@@ -1,0 +1,37 @@
+# 最小可用依赖集（Windows 友好 · 不 pin 死）
+#
+# 用途：如果 requirements.txt 装失败（如 Windows 撞 cffi 源码编译 / C++ Build Tools），
+# 改用本文件：pip install -r requirements-minimal.txt
+#
+# 覆盖：CLI 上传所需全部依赖（抖音/小红书/视频号/B站/快手/百家号/TikTok）
+# 不包含：Flask web 后端（如果你只用 CLI 不开 web 管理界面，本文件够用）
+
+# 核心：浏览器自动化
+playwright>=1.40.0
+greenlet>=3.0.0
+
+# HTTP 异步
+aiohttp>=3.9
+aiofiles>=23.0
+requests>=2.31
+httpx>=0.27
+
+# Cookie / 签名
+PyExecJS>=1.5.1
+toml>=0.10
+
+# 工具
+python-dotenv>=1.0
+typing-extensions>=4.10
+
+# B 站上传 CLI（如果用 biliup 命令行）
+biliup>=0.4.90
+
+# 可选：视频处理（截帧 / 合成）
+# ffmpeg-python>=0.2
+
+# 可选：图像处理（封面）
+pillow>=10.0
+
+# 可选：日志增强
+loguru>=0.7
